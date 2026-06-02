@@ -1,0 +1,35 @@
+name: Update Finviz Charts
+
+on:
+  schedule:
+    # 매일 22:00 UTC = 익일 07:00 KST (전날 미국 장 마감 이후)
+    - cron: "0 22 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Download charts & generate site
+        run: python update.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          force_orphan: true
+          commit_message: "update charts ${{ github.run_id }}"
