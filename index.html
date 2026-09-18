@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finviz 차트 대시보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --sidebar: 220px; }
+    body { background:#0f172a; color:#e2e8f0; font-family:'Segoe UI',sans-serif; }
+    .sidebar { width:var(--sidebar); flex-shrink:0; }
+    .cat-btn { display:block; width:100%; text-align:left; padding:6px 12px;
+               border-radius:8px; font-size:0.78rem; color:#94a3b8;
+               transition:background 0.15s,color 0.15s; line-height:1.35; }
+    .cat-btn:hover { background:#1e293b; color:#e2e8f0; }
+    .cat-btn.active { background:#1d4ed8; color:#fff; }
+    .card { background:#1e293b; border:1px solid #334155; border-radius:10px;
+            overflow:hidden; transition:border-color 0.15s,transform 0.15s; }
+    .card:hover { border-color:#60a5fa; transform:translateY(-2px); }
+    .card img { width:100%; display:block; cursor:pointer; }
+    .badge { font-size:0.7rem; font-weight:700; padding:2px 7px;
+             border-radius:99px; background:#1d4ed8; color:#bfdbfe; }
+    /* modal */
+    #modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.85);
+             z-index:999; align-items:center; justify-content:center; }
+    #modal.open { display:flex; }
+    #modal-img { max-width:92vw; max-height:88vh; border-radius:8px; }
+    /* search highlight */
+    .hidden-card { display:none !important; }
+    .spinner { border:3px solid #334155; border-top-color:#60a5fa;
+               border-radius:50%; width:36px; height:36px;
+               animation:spin .8s linear infinite; margin:80px auto; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    /* scrollbar */
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-track { background:#0f172a; }
+    ::-webkit-scrollbar-thumb { background:#334155; border-radius:3px; }
+    @media(max-width:768px){
+      .sidebar { width:100%; }
+      #sidebar-inner { display:flex; flex-wrap:nowrap; overflow-x:auto; gap:4px; padding:8px; }
+      .cat-btn { white-space:nowrap; flex-shrink:0; width:auto; }
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+<!-- 상단 바 -->
+<header class="flex items-center gap-4 px-5 py-3 border-b border-slate-700 bg-slate-900 flex-shrink-0">
+  <div>
+    <h1 class="text-base font-bold text-white leading-tight">Finviz 차트 대시보드</h1>
+    <p id="updated" class="text-xs text-slate-500 mt-0.5">로딩 중...</p>
+  </div>
+  <div class="flex-1 max-w-xs ml-4">
+    <input id="search" type="text" placeholder="티커 / 종목명 검색..."
+      class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white
+             placeholder-slate-500 focus:outline-none focus:border-blue-500" />
+  </div>
+  <div class="ml-auto flex items-center gap-3">
+    <span id="count" class="text-xs text-slate-400"></span>
+    <select id="cols-select"
+      class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none">
+      <option value="2">2열</option>
+      <option value="3" selected>3열</option>
+      <option value="4">4열</option>
+    </select>
+  </div>
+</header>
+
+<!-- 본문 -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- 사이드바 -->
+  <nav class="sidebar border-r border-slate-700 bg-slate-900 overflow-y-auto flex-shrink-0 md:block">
+    <div id="sidebar-inner" class="py-3 px-2 space-y-0.5">
+      <button class="cat-btn active" data-cat="all" onclick="filterCat('all', this)">
+        전체 보기
+      </button>
+    </div>
+  </nav>
+
+  <!-- 차트 영역 -->
+  <main class="flex-1 overflow-y-auto p-4">
+    <div id="loading"><div class="spinner"></div></div>
+    <div id="content" class="hidden">
+      <!-- categories injected by JS -->
+    </div>
+  </main>
+</div>
+
+<!-- 모달 -->
+<div id="modal" onclick="closeModal()">
+  <img id="modal-img" src="" alt="" onclick="event.stopPropagation()" />
+</div>
+
+<script>
+let ALL_DATA = null;
+let currentCat = 'all';
+let currentCols = 3;
+
+/* ── 로드 ── */
+async function init() {
+  try {
+    const r = await fetch(`charts_data.json?t=${Date.now()}`);
+    ALL_DATA = await r.json();
+    buildSidebar(ALL_DATA.categories);
+    renderAll(ALL_DATA.categories);
+    setColClass(currentCols);
+
+    const dt = new Date(ALL_DATA.updated_at);
+    const kst = new Date(dt.getTime() + 9*3600*1000);
+    document.getElementById('updated').textContent =
+      '업데이트: ' + kst.toISOString().replace('T',' ').slice(0,16) + ' KST';
+
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    updateCount();
+  } catch(e) {
+    document.getElementById('loading').innerHTML =
+      '<p class="text-center text-slate-400 mt-20">데이터를 불러올 수 없습니다.<br><span class="text-xs">GitHub Actions가 아직 실행되지 않았을 수 있습니다.</span></p>';
+    console.error(e);
+  }
+}
+
+/* ── 사이드바 ── */
+function buildSidebar(cats) {
+  const inner = document.getElementById('sidebar-inner');
+  cats.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.dataset.cat = cat.id;
+    btn.textContent = cat.name;
+    btn.onclick = () => filterCat(cat.id, btn);
+    inner.appendChild(btn);
+  });
+}
+
+/* ── 카테고리 필터 ── */
+function filterCat(catId, btn) {
+  currentCat = catId;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  document.querySelectorAll('.cat-section').forEach(sec => {
+    sec.style.display = (catId === 'all' || sec.dataset.cat === catId) ? '' : 'none';
+  });
+
+  // scroll to section
+  if (catId !== 'all') {
+    const sec = document.querySelector(`.cat-section[data-cat="${catId}"]`);
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  clearSearch();
+  updateCount();
+}
+
+/* ── 렌더 ── */
+function renderAll(cats) {
+  const content = document.getElementById('content');
+  content.innerHTML = '';
+  cats.forEach(cat => {
+    const sec = document.createElement('section');
+    sec.className = 'cat-section mb-8';
+    sec.dataset.cat = cat.id;
+
+    const h2 = document.createElement('h2');
+    h2.className = 'text-sm font-semibold text-slate-300 mb-3 px-1 flex items-center gap-2';
+    h2.innerHTML = `<span class="w-1 h-4 bg-blue-500 rounded-full inline-block"></span>${cat.name}
+      <span class="text-slate-600 font-normal">(${cat.items.length})</span>`;
+    sec.appendChild(h2);
+
+    const grid = document.createElement('div');
+    grid.className = 'chart-grid grid gap-3';
+    grid.style.gridTemplateColumns = `repeat(${currentCols}, minmax(0, 1fr))`;
+
+    cat.items.forEach(item => {
+      const card = buildCard(item);
+      grid.appendChild(card);
+    });
+
+    sec.appendChild(grid);
+    content.appendChild(sec);
+  });
+}
+
+function buildCard(item) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.ticker = item.ticker.toLowerCase();
+  card.dataset.label = item.label.toLowerCase();
+
+  const top = document.createElement('div');
+  top.className = 'flex items-center gap-2 px-3 py-2';
+  top.innerHTML = `<span class="badge">${item.ticker}</span>
+    <span class="text-xs text-slate-400 truncate" title="${item.label}">${item.label}</span>
+    <a href="https://finviz.com/quote.ashx?t=${item.ticker}" target="_blank"
+       class="ml-auto text-slate-600 hover:text-blue-400 text-xs flex-shrink-0" title="Finviz 상세">↗</a>`;
+
+  const img = document.createElement('img');
+  img.src = item.img;
+  img.alt = item.ticker;
+  img.loading = 'lazy';
+  img.onerror = function() {
+    this.style.display = 'none';
+    const err = document.createElement('div');
+    err.className = 'text-xs text-slate-600 text-center py-6';
+    err.textContent = '이미지 없음';
+    this.parentNode.appendChild(err);
+  };
+  img.onclick = () => openModal(item.img, item.ticker);
+
+  card.appendChild(top);
+  card.appendChild(img);
+  return card;
+}
+
+/* ── 열 수 ── */
+function setColClass(n) {
+  currentCols = n;
+  document.querySelectorAll('.chart-grid').forEach(g => {
+    g.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  });
+}
+document.getElementById('cols-select').addEventListener('change', e => setColClass(+e.target.value));
+
+/* ── 검색 ── */
+document.getElementById('search').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) {
+    document.querySelectorAll('.card').forEach(c => c.classList.remove('hidden-card'));
+    document.querySelectorAll('.cat-section').forEach(s => {
+      s.style.display = (currentCat === 'all' || s.dataset.cat === currentCat) ? '' : 'none';
+    });
+    updateCount();
+    return;
+  }
+
+  // Show all sections when searching
+  document.querySelectorAll('.cat-section').forEach(s => s.style.display = '');
+
+  let visible = 0;
+  document.querySelectorAll('.card').forEach(card => {
+    const match = card.dataset.ticker.includes(q) || card.dataset.label.includes(q);
+    card.classList.toggle('hidden-card', !match);
+    if (match) visible++;
+  });
+
+  // Hide empty sections
+  document.querySelectorAll('.cat-section').forEach(sec => {
+    const hasVisible = [...sec.querySelectorAll('.card')].some(c => !c.classList.contains('hidden-card'));
+    sec.style.display = hasVisible ? '' : 'none';
+  });
+
+  document.getElementById('count').textContent = `검색 결과: ${visible}개`;
+});
+
+function clearSearch() {
+  document.getElementById('search').value = '';
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('hidden-card'));
+}
+
+function updateCount() {
+  const total = document.querySelectorAll('.card:not(.hidden-card)').length;
+  document.getElementById('count').textContent = `${total}개 종목`;
+}
+
+/* ── 모달 ── */
+function openModal(src, ticker) {
+  document.getElementById('modal-img').src = src;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+init();
+</script>
+</body>
+</html>
