@@ -2,10 +2,14 @@ name: Update Finviz Charts
 
 on:
   schedule:
-    # 1차: 21:30 UTC = 익일 06:30 KST (Mon-Fri KST = Sun-Thu UTC)
-    - cron: "30 21 * * 0-4"
-    # 2차 백업: 22:30 UTC = 익일 07:30 KST
-    - cron: "30 22 * * 0-4"
+    # GitHub 스케줄이 예약보다 2~4.5시간 늦게 도는 실측(2026-09) 때문에 앞당기고,
+    # 혼잡한 정각·30분을 피해 분 단위를 비껴 둔다. 마지막 실행이 덮어쓰므로 여러 번 돌아도 무방.
+    # 05:47 KST (미국장 마감 05:00 KST 직후, 서머타임 기준)
+    - cron: "47 20 * * 0-4"
+    # 06:07 KST
+    - cron: "7 21 * * 0-4"
+    # 06:37 KST
+    - cron: "37 21 * * 0-4"
   workflow_dispatch:
 
 jobs:
